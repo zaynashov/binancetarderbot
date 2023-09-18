@@ -44,15 +44,15 @@ class SymbolCycle:
 # блок номер 2 взоимодействия с системой
 
 
-def get_historical_data(ghd_symbol, timeframe):
-    ohlcv = exchange.fetch_ohlcv(ghd_symbol, timeframe)
+def get_historical_data(symbol_ghd, timeframe):
+    ohlcv = exchange.fetch_ohlcv(symbol_ghd, timeframe)
     df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
     df.set_index('timestamp', inplace=True)
-    token_name = symbol.replace('/', '')  # Имя токена без '/'
-    file_name = f'{token_name}.csv'  # Генерация имени файла
+    file_name = f'{symbol_ghd}.csv'  # Генерация имени файла
     file_name = f'candles/{file_name}'
     df.to_csv(file_name, mode='w')  # Сохраняем полученные данные в файл
+    addcurrentprices()
 
 
 def addcurrentprices():
@@ -95,9 +95,9 @@ def addcurrentprices():
             json.dump(data, json_file, indent=2)
 
         # Выводим информацию для проверки
-        print("Added Current Prices and Updated Position Sides in positions.")
+        # print("Added Current Prices and Updated Position Sides in positions.")
     else:
-        print("No positions found in the JSON file.")
+        pass
 
 
 def get_filtered_account_data(gfad_api_key, gfad_secret_key):
@@ -141,7 +141,7 @@ def get_filtered_account_data(gfad_api_key, gfad_secret_key):
     if os.path.exists(file_name):
         with open(file_name, 'w') as json_file:
             json.dump(filtered_data, json_file, indent=2)
-        print(f"Файл '{file_name}' был перезаписан.")
+        # print(f"Файл '{file_name}' был перезаписан.")
     else:
         with open(file_name, 'w') as json_file:
             json.dump(filtered_data, json_file, indent=2)
@@ -176,6 +176,18 @@ def acc_trade_position():  # проверка аккаунта торгуетс�
             positionside_atp = positions["positionSide"]
             positionentryprice_atp = positions["entryPrice"]
             return positionside_atp, positionentryprice_atp
+
+
+def acc_trade_pnl():  # проверка аккаунта торгуется или нет в данный момент
+    with open("filtered_account_balance.json", "r") as json_file:
+        data = json.load(json_file)
+
+    # Проверьте, есть ли массив assets и что initialMargin равно нулю в любом из его элементов
+    if "positions" in data:
+        for positions in data["positions"]:
+            positionpnl_atp = float(positions["unrealizedProfit"])
+            positionpnl_atp = f"{positionpnl_atp:.2f}"
+            return positionpnl_atp
 
 
 # блок номер 3 индикаторы
@@ -272,7 +284,7 @@ def strategy_macd(data_file):
 
         return cal_macd, cal_signal_line, cal_histogram
     # Загрузка данных из файла (замените на свой путь к файлу)
-    data_file = f'candles/{data_file.replace("/", "")}'
+    data_file = f'candles/{data_file}'
     df = pd.read_csv(data_file, parse_dates=['timestamp'], index_col='timestamp')
 
     # Вызываем функцию расчета MACD
@@ -446,22 +458,18 @@ def position_take_profi(symbol_tpf, amount_percent):
 # блок номер 4 определение сигнала
 
 
-def define_signal(ds_target_rsi_high, ds_target_rsi_low):
+def define_signal(symbol_ds):
     ds_signal = 'signal'
-    atr_signal = strategy_atr(f'{symbol.replace("/", "")}.csv', atr_length, atr_period, ema_length)
-    rsi_ds, rsi_direction = strategy_rsi(f'{symbol.replace("/", "")}.csv')
-    macd_ds, macd_signal_line, macd_direction = strategy_macd(f'{symbol.replace("/", "")}.csv')
+    atr_signal = strategy_atr(f'{symbol_ds}.csv', atr_length, atr_period, ema_length)
+    rsi_ds, rsi_direction = strategy_rsi(f'{symbol_ds}.csv')
+    macd_ds, macd_signal_line, macd_direction = strategy_macd(f'{symbol_ds}.csv')
     if atr_signal != ds_signal:
         ds_signal = atr_signal
     if ds_signal == 'sell' and \
-            rsi_ds > ds_target_rsi_low and \
-            macd_ds > 0 and \
             macd_direction == 'Bearish' and \
             rsi_direction == 'Bearish':
         out_signal = 'SHORT'
     elif ds_signal == 'buy' and \
-            rsi_ds < ds_target_rsi_high and \
-            macd_ds > 0 and \
             macd_direction == 'Bullish' and \
             rsi_direction == 'Bullish':
         out_signal = 'LONG'
@@ -475,13 +483,13 @@ if __name__ == "__main__":
     api_key = api
     api_secret = secret
     client = Client(api_key, api_secret)
-    bot_timeframe = '15m'  # только стандартные значения: 1m, 5m, 15m, 30m, 1h, 2h
-    atr_length = 1
-    atr_period = 15
-    ema_length = 10
+    bot_timeframe = '5m'  # только стандартные значения: 1m, 5m, 15m, 30m, 1h, 2h
+    atr_length = 2
+    atr_period = 10
+    ema_length = 50
     rsi_length = 14  # период для расчета RSI
-    target_rsi_high = 60  # функция даст положительный сигнал если RSI ниже этого значения
-    target_rsi_low = 40  # функция даст положительный сигнал если RSI выше этого значения
+    target_rsi_high = 75  # функция даст положительный сигнал если RSI ниже этого значения
+    target_rsi_low = 25  # функция даст положительный сигнал если RSI выше этого значения
     signal = 'signal'
     cicle = 0
     inposition = False
@@ -493,6 +501,8 @@ if __name__ == "__main__":
     leverage = 20
     while True:
         get_filtered_account_data(api_key, api_secret)
+        addcurrentprices()
+        time.sleep(0.01)
         intrade = acc_trade_check()
         if not intrade:
             take_profit_1 = False
@@ -501,70 +511,107 @@ if __name__ == "__main__":
             while True:
                 symbol = symbol_cycle.get_next_symbol()
                 get_historical_data(symbol, bot_timeframe)
-                signal = define_signal(target_rsi_high, target_rsi_low)
-                bnce_symbol = symbol.replace("/", "")
-                print(f'Сигнал пары {bnce_symbol}: {signal}')
+                # bnce_symbol = symbol.replace("/", "")
+                signal = define_signal(symbol)
+                print(f'Сигнал пары {symbol}: {signal}')
                 if signal != 'NONE':
                     space = '  '
-                    print(f"{bnce_symbol}: signal:{signal}")
-                    toast.toast('Новый сигнал', bnce_symbol + space + signal)
-                if bnce_symbol == 'CYBERUSDT':
+                    print(f"{symbol}: signal:{signal}")
+                    toast.toast('Новый сигнал', symbol + space + signal)
+                if symbol == 'CYBERUSDT':
                     cicle = cicle + 1
                     print(f'Цикл {cicle} закончен, ждем следующего цикла')
                     if cicle % 10 == 0:
                         print("Счетчик кратен 10. Ожидание 10 минуту...")
                         time.sleep(60 * 10)  # Подождать 10 минут
                     else:
-                        time.sleep(60 * 5)
+                        time.sleep(60 * 2)
                 if signal == 'LONG':
-                    quantity = calculate_token_amount(bnce_symbol, quantity_usdt, leverage)
-                    token_amount = format_quantity(bnce_symbol, quantity)
-                    new_position(bnce_symbol, side_np='BUY', quantity_np=token_amount)
+                    quantity = calculate_token_amount(symbol, quantity_usdt, leverage)
+                    token_amount = format_quantity(symbol, quantity)
+                    new_position(symbol, side_np='BUY', quantity_np=token_amount)
                     get_filtered_account_data(api_key, api_secret)
                     intrade = True
                     break
                 if signal == 'SHORT':
-                    quantity = calculate_token_amount(bnce_symbol, quantity_usdt, leverage)
-                    token_amount = format_quantity(bnce_symbol, quantity)
-                    new_position(bnce_symbol, side_np='SELL', quantity_np=token_amount)
+                    quantity = calculate_token_amount(symbol, quantity_usdt, leverage)
+                    token_amount = format_quantity(symbol, quantity)
+                    new_position(symbol, side_np='SELL', quantity_np=token_amount)
                     get_filtered_account_data(api_key, api_secret)
                     intrade = True
                     break
                 time.sleep(0.1)
         if intrade:
             while True:
+                get_filtered_account_data(api_key, api_secret)
                 intrade = acc_trade_check()
                 if not intrade:
                     break
-                symbol_trade, roe_trade = calculate_roe()
+                symbol_trade, roe_trade_inposition = calculate_roe()
                 positionside_trade, positionentryprice_trade = acc_trade_position()
                 mark_price = get_token_price(symbol_trade)
-                print(f'{symbol_trade}:  {roe_trade}%')
+                get_historical_data(symbol_trade, bot_timeframe)
+                atr_signal_trade = strategy_atr(f'{symbol_trade}.csv', atr_length, atr_period, ema_length)
+                pnl_trade = acc_trade_pnl()
+                # print(atr_signal_trade)
+                # print(f'roe пряиой запрос {roe_trade_inposition}')
+                roe_trade = abs(float(roe_trade_inposition))
+                # print(f'roe после roe_trade = abs(float(roe_trade_inposition)){roe_trade}')
                 if positionside_trade == "LONG" and float(mark_price) < float(positionentryprice_trade):
-                    if abs(float(roe_trade)) > 12:
-                        close_position_market(symbol_trade)
-                        get_filtered_account_data(api_key, api_secret)
-                        break
+                    roe_trade = roe_trade * -1
                 if positionside_trade == "SHORT" and float(mark_price) > float(positionentryprice_trade):
-                    if abs(float(roe_trade)) > 12:
+                    roe_trade = roe_trade * -1
+                print(f'{symbol_trade}: {positionside_trade},  Нереализованная PNL:  {pnl_trade}  {roe_trade}%  ')
+                if positionside_trade == "LONG" and atr_signal_trade == 'sell':
+                    close_position_market(symbol_trade)
+                    toast.toast('Position closed', f'Позиция {symbol_trade} \
+                    закрыта из-за изменения сигнала в отрицательную сторону')
+                    get_filtered_account_data(api_key, api_secret)
+                    break
+                if positionside_trade == "SHORT" and atr_signal_trade == 'buy':
+                    close_position_market(symbol_trade)
+                    toast.toast('Position closed', f'Позиция {symbol_trade} \
+                    закрыта из-за изменения сигнала в положительную сторону')
+                    get_filtered_account_data(api_key, api_secret)
+                    break
+                if roe_trade < 0:
+                    if abs(roe_trade) > 30:
                         close_position_market(symbol_trade)
+                        toast.toast('Position closed', f'Позиция {symbol_trade} закрыта в минус')
                         get_filtered_account_data(api_key, api_secret)
                         break
-                if float(roe_trade) > 0:
-                    if abs(float(roe_trade)) > 6 and not take_profit_1:
+                if roe_trade > 0:
+                    if roe_trade > 15 and not take_profit_1:
                         position_take_profi(symbol_trade, amount_percent=50)
+                        toast.toast('Take profit', f'Тейк профит 1 {symbol_trade}')
                         take_profit_1 = True
                         get_filtered_account_data(api_key, api_secret)
-                    if abs(float(roe_trade)) > 11 and take_profit_1 and not take_profit_2:
-                        position_take_profi(symbol_trade, amount_percent=50)
+                    if roe_trade > 25 and take_profit_1 and not take_profit_2:
+                        position_take_profi(symbol_trade, amount_percent=30)
+                        toast.toast('Take profit', f'Тейк профит 2 {symbol_trade}')
                         take_profit_2 = True
                         get_filtered_account_data(api_key, api_secret)
-                    if abs(float(roe_trade)) > 17 and take_profit_1 and take_profit_2 and not take_profit_3:
-                        position_take_profi(symbol_trade, amount_percent=50)
+                    if roe_trade > 45 and take_profit_1 and take_profit_2 and not take_profit_3:
+                        position_take_profi(symbol_trade, amount_percent=30)
+                        toast.toast('Position closed', f'Позиция {symbol_trade} закрыта с прыбылью')
                         get_filtered_account_data(api_key, api_secret)
                         take_profit_3 = True
-                    if abs(float(roe_trade)) > 25:
+                    if take_profit_1 and roe_trade < 3:
                         close_position_market(symbol_trade)
-                        get_filtered_account_data(api_key, api_secret)
+                        toast.toast('Position closed', f'Позиция {symbol_trade} \
+                                            закрыта по трейлинг стопу')
+                        break
+                    if take_profit_2 and roe_trade < 10:
+                        close_position_market(symbol_trade)
+                        toast.toast('Position closed', f'Позиция {symbol_trade} \
+                                            закрыта по трейлинг стопу')
+                        break
+                    if take_profit_3 and roe_trade < 25:
+                        close_position_market(symbol_trade)
+                        toast.toast('Position closed', f'Позиция {symbol_trade} \
+                                            закрыта по трейлинг стопу')
+                        break
+                    if roe_trade > 70:
+                        close_position_market(symbol_trade)
                         break
                 time.sleep(0.01)
